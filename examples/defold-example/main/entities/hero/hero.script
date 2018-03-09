@@ -1,0 +1,164 @@
+local traveler = require("m.timetraveler")
+
+-- Pre-hashing
+local contactResponse = hash("contact_point_response")
+local jumpInput = hash("jump")
+local shiftInput = hash("shift")
+local escInput = hash("escape")
+local tabInput = hash("tab")
+local rightInput = hash("right")
+local leftInput = hash("left")
+local groundGroup = hash("ground")
+local heroGroup = hash("hero")
+
+-- Constants
+local minSpeed = 40
+local maxSpeed = 290
+local acceleration = 3200
+local jumpPower = -500
+local gravity = 2000
+
+-- Functions
+function init(self)
+	msg.post(".", "acquire_input_focus")
+  self.startPosition = go.get_position()
+  self.velocity = vmath.vector3(0, 0, 0)
+  self.grounded = false
+	self.flip = false
+	self.moveInput = 0
+	traveler.init(
+		{go.get_position, go.set_position},
+		{go.get_rotation, go.set_rotation},
+		{go.get_scale, go.set_scale},
+		{function() return self.flip end, function(v) self.flip = v end}
+	)
+end
+
+function final(self)
+  msg.post(".", "release_input_focus")
+end
+
+function update(self, dt)
+	local position = go.get_position()
+	-- APPLY GRAVITY
+	if not self.grounded then
+		self.velocity.y = self.velocity.y + dt * gravity
+		position.y = position.y - self.velocity.y * dt
+	else
+		self.velocity.y = 0
+	end
+	go.set_position(position)
+	handle_movement(self, dt)
+	-- Reset volatile states
+	self.correction = vmath.vector3()
+	if doRewind then
+		traveler.rewind()
+	else
+		traveler.record(dt)
+	end
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == contactResponse then
+		if message.group == groundGroup then
+			handle_ground_collision(self, message.normal, message.distance)
+		end
+	end
+end
+
+function on_input(self, action_id, action)
+	-- QUIT
+	if action_id == escInput then
+		if action.pressed then
+			msg.post("@system:", "exit", {code = 0})
+		end
+	end
+	-- DEBUG
+	if action_id == tabInput then
+		if action.pressed then
+			msg.post("@system:", "toggle_profile")
+		end
+	end
+	-- JUMP
+	if action_id == jumpInput then
+    if action.pressed and self.grounded then
+			self.velocity.y = jumpPower
+			self.grounded = false
+    end
+	end
+	-- RIGHT
+	if action_id == rightInput then
+		if action.released then
+			self.moveInput = 0
+		else
+			self.moveInput = action.value
+		end
+	end
+	-- LEFT
+	if action_id == leftInput then
+		if action.released then
+			self.moveInput = 0
+		else
+			self.moveInput = -action.value
+		end
+  end
+	-- REWIND
+	if action_id == shiftInput then
+		if action.pressed then
+			doRewind = true
+		end
+		if action.released then
+			doRewind = false
+			self.grounded = false
+		end
+	end
+end
+
+function handle_ground_collision(self, normal, distance)
+    local projection = vmath.dot(self.correction, normal)
+    local compensation = (distance - projection) * normal
+    self.correction = self.correction + compensation
+    go.set_position(go.get_position() + compensation)
+    if normal.y > 0.7 then
+      self.grounded = true
+    end
+    projection = vmath.dot(self.velocity, normal)
+    if projection < 0 then
+      self.velocity = self.velocity - projection * normal
+    end
+end
+
+function handle_movement(self, dt)
+	local position = go.get_position()
+	-- RIGHT
+	if self.moveInput > 0 then
+		self.flip = false
+		if self.velocity.x < maxSpeed then
+			self.velocity.x = self.velocity.x + dt * acceleration
+		else
+			self.velocity.x = maxSpeed
+		end
+	end
+	-- LEFT
+	if self.moveInput < 0 then
+		self.flip = true
+		if self.velocity.x > -maxSpeed then
+			self.velocity.x = self.velocity.x - dt * acceleration
+		else
+			self.velocity.x = -maxSpeed
+		end
+	end
+	-- STOP
+	if self.moveInput == 0 then
+		if self.velocity.x > minSpeed then
+			self.velocity.x = self.velocity.x - dt * acceleration
+		elseif self.velocity.x < -minSpeed then
+			self.velocity.x = self.velocity.x + dt * acceleration
+		else
+			self.velocity.x = 0
+		end
+	end
+	sprite.set_hflip("#sprite", self.flip)
+	position.x = position.x + self.velocity.x * dt
+  go.set_position(position)
+end

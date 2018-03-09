@@ -1,0 +1,4 @@
+tile_set: "/main/entities/hero/hero.atlas"
+default_animation: "hero"
+material: "/builtins/materials/sprite.material"
+blend_mode: BLEND_MODE_ALPHA
